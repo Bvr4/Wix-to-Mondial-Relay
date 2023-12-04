@@ -3,23 +3,23 @@ import json
 from mondialrelay_pyt import MRWebService
 
 # Création du dictionnaire à destination de MRWebService
-def creer_dictionnaire_MR(commande):
-    pays = commande['shippingInfo']['code'][5-6]
+def creer_dictionnaire_MR(commande, enseigne, collecte_mode_livraison, expediteur):
+    pays = commande['shippingInfo']['code'][5:7]
 
     dico = {}
     
-    dico['Enseigne'] = 'BDTEST13'   # à modifier
-    dico['ModeCol'] = 'REL'         # à vérifier
-    dico['ModeLiv'] = '24R'         # à vérifier
-    dico['NDossier'] = commande['number']
+    dico['Enseigne'] = enseigne  
+    dico['ModeCol'] = collecte_mode_livraison['ModeCol']        # valeur à vérifier
+    dico['ModeLiv'] = collecte_mode_livraison['ModeLiv']        # valeur à vérifier
+    dico['NDossier'] = str(commande['number'])
     dico['Expe_Langage'] = 'FR'
-    dico['Expe_Ad1'] = "L'ÉTOFFE LIBRE X LA CARRIOLE"
-    dico['Expe_Ad3'] = 'CERVELLE'
-    dico['Expe_Ad4'] = 'LE TOURNEUR'
-    dico['Expe_Ville'] = 'SOULEUVRE EN BOCAGE'
-    dico['Expe_CP'] = '14350'
-    dico['Expe_Pays'] = 'FR'
-    dico['Expe_Tel1'] = '0033606920855'
+    dico['Expe_Ad1'] = expediteur['Expe_Ad1'] 
+    dico['Expe_Ad3'] = expediteur['Expe_Ad3']
+    dico['Expe_Ad4'] = expediteur['Expe_Ad4']
+    dico['Expe_Ville'] = expediteur['Expe_Ville']
+    dico['Expe_CP'] = expediteur['Expe_CP']
+    dico['Expe_Pays'] = expediteur['Expe_Pays']
+    dico['Expe_Tel1'] = expediteur['Expe_Tel1']
     dico['Dest_Langage'] = pays
     dico['Dest_Ad1'] = commande['buyerInfo']['firstName'] + " " + commande['buyerInfo']['lastName']
 
@@ -47,7 +47,7 @@ def creer_dictionnaire_MR(commande):
     dico['CRT_Valeur'] = '0'
 
     dico['COL_Rel_Pays'] = 'FR'
-    dico['COL_Rel'] = '67644' # Code VETISA
+    dico['COL_Rel'] = collecte_mode_livraison['COL_Rel'] 
 
     dico['LIV_Rel_Pays'] = pays
     dico['LIV_Rel'] = commande['shippingInfo']['code'][8:]
@@ -55,19 +55,33 @@ def creer_dictionnaire_MR(commande):
     return dico
 
 
+# Lecture des informations sur l'expéditeur, stockées dans un json
+with open('informations_expediteur.json') as f:
+    infos_expe = json.load(f)
+
+# Lecture des informations sur la collecte et le mode de livraison, stockées dans un json
+with open('informations_collecte_et_mode_de_livraison.json') as f:
+    infos_collecte_mode_livraison = json.load(f)
+
 # Lecture des tokens pour l'API Wix
-with open('account_id.token') as f:
-    account_id=f.read().strip('\n')
-with open('api_key.token') as f:
-    api_key=f.read().strip('\n')
+with open('wix_account_id.token') as f:
+    wix_account_id=f.read().strip('\n')
+with open('wix_api_key.token') as f:
+    wix_api_key=f.read().strip('\n')
+
+# Lecture des tokens pour l'API Mondial Relay
+with open('mr_enseigne.token') as f:
+    mr_enseigne=f.read().strip('\n')
+with open('mr_private_key.token') as f:
+    mr_private_key=f.read().strip('\n')
 
 
 # Récupération du site_id (ici nous avons un seul site)
 url = 'https://www.wixapis.com/site-list/v2/sites/query'
 
 headers = {'Content-Type': 'application/json',
-           'Authorization': api_key,
-           'wix-account-id': account_id
+           'Authorization': wix_api_key,
+           'wix-account-id': wix_account_id
            }
 
 response = requests.post(url, headers=headers)
@@ -91,14 +105,28 @@ query = '{"query":{"filter": "{ \\"number\\": \\"10979\\"}", "sort":"[{\\"dateCr
 response = requests.post(url, headers=headers, data=query)
 json_response = response.json()
 
-# On traite les commandes si le mode de livraison est Mondial Relay
-for order in json_response['orders']:
-    print (f"* Traitement commande N°{order['number']}")
-    if order['shippingInfo']['deliveryOption'].startswith("MONDIAL RELAY"):
-        print (order['shippingInfo']['deliveryOption']) 
+# création connexion à MR
+connexion_mr = MRWebService(mr_private_key)
 
-        dico = creer_dictionnaire_MR(order)
-        print (dico)
+# On filtre les commandes pour ne garder que celles avec Mondial Relay comme mode de livraison
+mr_orders = [order for order in json_response['orders'] if order['shippingInfo']['deliveryOption'].startswith("MONDIAL RELAY")]
+
+
+for order in mr_orders:
+    print (f"* Traitement commande N°{order['number']} - {order['shippingInfo']['deliveryOption']}")
+
+    dico = creer_dictionnaire_MR(order, mr_enseigne, infos_collecte_mode_livraison, infos_expe)
+    print (dico)
+
+    req_mr = connexion_mr.make_shipping_label(dico)
+    print (req_mr)
+
+    order['ExpeditionNum'] = req_mr['ExpeditionNum']
+
+    # Téléchargement du pdf contenant l'étiquette
+    etiquette = requests.get(req_mr['URL_Etiquette'])
+    open(f"etiquette_{req_mr['ExpeditionNum']}.pdf", "wb").write(etiquette.content)
+
 
 
 
