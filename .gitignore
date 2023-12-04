@@ -1,0 +1,9 @@
+venv/
+*.json
+*.csv
+*.pdf
+*.token
+mondialrelay_pyt.py
+csv_header.py
+requirements_.txt
+__pycache__
