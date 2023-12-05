@@ -1,6 +1,8 @@
 import requests
 import json
+import os
 from mondialrelay_pyt import MRWebService
+from creer_linsting_commandes import creer_listing_commandes
 
 # Création du dictionnaire à destination de MRWebService
 def creer_dictionnaire_MR(commande, enseigne, collecte_mode_livraison, expediteur):
@@ -36,13 +38,13 @@ def creer_dictionnaire_MR(commande, enseigne, collecte_mode_livraison, expediteu
 
     if 'phone' in commande['buyerInfo']:
         if commande['buyerInfo']['phone'].startswith('06'):
-            dico['Dest_Tel1'] = '0033' + commande['buyerInfo']['phone'][2-9]
+            dico['Dest_Tel1'] = '0033' + commande['buyerInfo']['phone'][1:]
         else:
             dico['Dest_Tel1'] = commande['buyerInfo']['phone']
 
     dico['Dest_Mail'] = commande['buyerInfo']['email']
 
-    dico['Poids'] = str(float(commande['totals']['weight']) * 1000)
+    dico['Poids'] = str(int(float(commande['totals']['weight']) * 1000))
     dico['NbColis'] = '1'
     dico['CRT_Valeur'] = '0'
 
@@ -54,25 +56,29 @@ def creer_dictionnaire_MR(commande, enseigne, collecte_mode_livraison, expediteu
 
     return dico
 
+path = os.path.realpath(__file__) 
+dir = os.path.dirname(path) 
+dir_config = dir.replace('sources', 'config')
+dir_tokens = dir.replace('sources', 'tokens')
 
 # Lecture des informations sur l'expéditeur, stockées dans un json
-with open('informations_expediteur.json') as f:
+with open(dir_config + '/informations_expediteur.json') as f:
     infos_expe = json.load(f)
 
 # Lecture des informations sur la collecte et le mode de livraison, stockées dans un json
-with open('informations_collecte_et_mode_de_livraison.json') as f:
+with open(dir_config + '/informations_collecte_et_mode_de_livraison.json') as f:
     infos_collecte_mode_livraison = json.load(f)
 
 # Lecture des tokens pour l'API Wix
-with open('wix_account_id.token') as f:
+with open(dir_tokens + '/wix_account_id.token') as f:
     wix_account_id=f.read().strip('\n')
-with open('wix_api_key.token') as f:
+with open(dir_tokens + '/wix_api_key.token') as f:
     wix_api_key=f.read().strip('\n')
 
 # Lecture des tokens pour l'API Mondial Relay
-with open('mr_enseigne.token') as f:
+with open(dir_tokens + '/mr_enseigne.token') as f:
     mr_enseigne=f.read().strip('\n')
-with open('mr_private_key.token') as f:
+with open(dir_tokens + '/mr_private_key.token') as f:
     mr_private_key=f.read().strip('\n')
 
 
@@ -97,10 +103,10 @@ headers['wix-site-id'] = site_id
 url = 'https://www.wixapis.com/stores/v2/orders/query'
 
 # Requète pour tester sur une commande, en fonction de son numéro de commande
-query = '{"query":{"filter": "{ \\"number\\": \\"10979\\"}", "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
+# query = '{"query":{"filter": "{ \\"number\\": \\"10997\\"}", "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
 
 # Requète permettant de récupérer les commande non envoyées
-# query = '{"query":{"filter": "{ \\"fulfillmentStatus\\": \\"NOT_FULFILLED\\"}", "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
+query = '{"query":{"filter": "{ \\"fulfillmentStatus\\": \\"NOT_FULFILLED\\"}", "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
 
 response = requests.post(url, headers=headers, data=query)
 json_response = response.json()
@@ -121,12 +127,15 @@ for order in mr_orders:
     req_mr = connexion_mr.make_shipping_label(dico)
     print (req_mr)
 
-    order['ExpeditionNum'] = req_mr['ExpeditionNum']
-
     # Téléchargement du pdf contenant l'étiquette
-    etiquette = requests.get(req_mr['URL_Etiquette'])
+    url_etiquette_10x15 = req_mr['URL_Etiquette'].replace('format=A4', 'format=10x15')
+    etiquette = requests.get(url_etiquette_10x15)
     open(f"etiquette_{req_mr['ExpeditionNum']}.pdf", "wb").write(etiquette.content)
 
+    # Mise à jour des informations Wix sur la livraison
+    url = 'https://www.wixapis.com/stores/v2/orders/' + order['id'] + '/fulfillments'
+    query =  '{"fulfillment": {"lineItems": [{"index": 1,"quantity": 1}],"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}' # à tester !
+    response = requests.post(url, headers=headers, data=query)  # à tester !
+    print(response)
 
-
-
+creer_listing_commandes(mr_orders)
