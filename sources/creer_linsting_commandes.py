@@ -19,6 +19,9 @@ def creer_listing_commandes(commandes):
     y -= 20
 
     font_size = 12
+
+    # On filtre les commandes pour ne garder que celles qui ont été traitées 
+    commandes = [commande for commande in commandes if commande['traitementOK']]
     
     for commande in commandes:
         c.drawString(x, y, "")
