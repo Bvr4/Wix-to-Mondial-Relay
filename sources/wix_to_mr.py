@@ -2,6 +2,7 @@ import requests
 import json
 import os
 from mondialrelay_pyt import MRWebService
+import logging
 
 class WixToMR():
     def __init__(self):
@@ -39,6 +40,9 @@ class WixToMR():
                 }
 
         response = requests.post(url, headers=self.headers)
+        if response.status_code != 200:
+            raise Exception("Impossible de récupérer les informations de sites Wix")
+        
         self.sites = response.json()['sites']
         self.choisir_site(0) 
 
@@ -60,6 +64,9 @@ class WixToMR():
         query = '{"query":{"filter": "{ \\"fulfillmentStatus\\": \\"NOT_FULFILLED\\"}", "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
 
         response = requests.post(url, headers=self.headers, data=query)
+        if response.status_code != 200:
+            raise Exception("Impossible de récupérer les commandes en attente chez Wix")
+        
         json_response = response.json()
 
         # On filtre les commandes pour ne garder que celles avec Mondial Relay comme mode de livraison
@@ -68,17 +75,18 @@ class WixToMR():
     # Traitement d'une commande : téléchargement du bon Mondial Relay + MAJ infos livraisons chezz Wix
     def traiter_commande(self, order_number):
         # On récupère la commande demandée
-        order = [order for order in self.mr_orders if order['number']==order_number][0]
-
-        print (f"* Traitement commande N°{order['number']} - {order['shippingInfo']['deliveryOption']}")
+        try:
+            order = [order for order in self.mr_orders if order['number']==order_number][0]
+        except:
+            raise IndexError("Ce numéro de commande n'existe pas dans la liste des commandes en attente")
 
         dico = self.creer_dictionnaire_MR(order)
-        print (dico)
+        logging.debug(dico)
 
         # Création étiquette Mondial Relay
         connexion_mr = MRWebService(self.mr_private_key)
         req_mr = connexion_mr.make_shipping_label(dico)
-        print (req_mr)
+        logging.debug(req_mr)
 
         # Téléchargement du pdf contenant l'étiquette
         url_etiquette_10x15 = req_mr['URL_Etiquette'].replace('format=A4', 'format=10x15')
@@ -87,8 +95,10 @@ class WixToMR():
 
         # Mise à jour des informations Wix sur la livraison
         url = 'https://www.wixapis.com/stores/v2/orders/' + order['id'] + '/fulfillments'
-        query =  '{"fulfillment": {"lineItems": [{"index": 1,"quantity": 1}],"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}' # à tester !
-        response = requests.post(url, headers=self.headers, data=query)  # à tester !
+        query =  '{"fulfillment": {"lineItems": [{"index": 1,"quantity": 1}],"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}'
+        response = requests.post(url, headers=self.headers, data=query) 
+        if response.status_code != 200:
+            raise Exception(f"Impossible de mettre à jour le status de la commande {order['number']}")
         # print(response)
 
         order['traitementOK'] = True
