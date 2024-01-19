@@ -1,6 +1,7 @@
 venv/
 tokens/
 config/
+log/
 *.json
 *.csv
 *.pdf

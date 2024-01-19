@@ -31,7 +31,7 @@ class WixToMR():
         with open(dir_tokens + '/mr_private_key.token') as f:
             self.mr_private_key=f.read().strip('\n')
 
-        # Récupération du site_id 
+        # Récupération des site_id 
         url = 'https://www.wixapis.com/site-list/v2/sites/query'
 
         self.headers = {'Content-Type': 'application/json',
@@ -57,11 +57,8 @@ class WixToMR():
     def recuperer_commandes_wix(self):
         url = 'https://www.wixapis.com/stores/v2/orders/query'
 
-        # Requète pour tester sur une commande, en fonction de son numéro de commande
-        # query = '{"query":{"filter": "{ \\"number\\": \\"10997\\"}", "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
-
         # Requète permettant de récupérer les commande non envoyées
-        query = '{"query":{"filter": "{ \\"fulfillmentStatus\\": \\"NOT_FULFILLED\\"}", "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
+        query = '{"query":{"filter": "{\\"$or\\": [{\\"fulfillmentStatus\\": \\"NOT_FULFILLED\\"}, {\\"fulfillmentStatus\\": \\"PARTIALLY_FULFILLED\\"}]}","paging": {"limit": 100}, "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
 
         response = requests.post(url, headers=self.headers, data=query)
         if response.status_code != 200:
@@ -72,34 +69,40 @@ class WixToMR():
         # On filtre les commandes pour ne garder que celles avec Mondial Relay comme mode de livraison
         self.mr_orders = [order for order in json_response['orders'] if order['shippingInfo']['deliveryOption'].startswith("MONDIAL RELAY")]
 
-    # Traitement d'une commande : téléchargement du bon Mondial Relay + MAJ infos livraisons chezz Wix
+    # Traitement d'une commande : téléchargement du bon Mondial Relay + MAJ infos livraisons chez Wix
     def traiter_commande(self, order_number):
         # On récupère la commande demandée
         try:
             order = [order for order in self.mr_orders if order['number']==order_number][0]
         except:
-            raise IndexError("Ce numéro de commande n'existe pas dans la liste des commandes en attente")
+            raise IndexError("Ce numéro de commande n'existe pas dans la liste des commandes en attente : " + str(order_number))
+        
+        logging.info(f"Traitement commande N°{order['number']} - {order['buyerInfo']['firstName']} {order['buyerInfo']['lastName']}")
 
         dico = self.creer_dictionnaire_MR(order)
         logging.debug(dico)
+
+        items_to_fulfill = self.creer_items_fuflfillment(order)
+        logging.debug("items to fulfill : " + str(items_to_fulfill))
 
         # Création étiquette Mondial Relay
         connexion_mr = MRWebService(self.mr_private_key)
         req_mr = connexion_mr.make_shipping_label(dico)
         logging.debug(req_mr)
 
-        # Téléchargement du pdf contenant l'étiquette
+        # # Téléchargement du pdf contenant l'étiquette
         url_etiquette_10x15 = req_mr['URL_Etiquette'].replace('format=A4', 'format=10x15')
         etiquette = requests.get(url_etiquette_10x15)
         open(f"etiquette_{req_mr['ExpeditionNum']}.pdf", "wb").write(etiquette.content)
 
         # Mise à jour des informations Wix sur la livraison
         url = 'https://www.wixapis.com/stores/v2/orders/' + order['id'] + '/fulfillments'
-        query =  '{"fulfillment": {"lineItems": [{"index": 1,"quantity": 1}],"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}'
+        query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}' # à vérifier !!
+        print(query)
         response = requests.post(url, headers=self.headers, data=query) 
         if response.status_code != 200:
             raise Exception(f"Impossible de mettre à jour le status de la commande {order['number']}")
-        # print(response)
+        print(response)
 
         order['traitementOK'] = True
 
@@ -166,3 +169,14 @@ class WixToMR():
         dico['LIV_Rel'] = order['shippingInfo']['code'][8:]
 
         return dico
+    
+    # Creation de la liste des items dont on update le fullfilment status (items qui vont être livrés = tous les items physiques)
+    def creer_items_fuflfillment(self, order):
+        liste = []
+        for item in order['lineItems']:
+            if item['lineItemType'] == 'PHYSICAL':
+                info = {'index':  item['index'],
+                        'quantity': item['quantity']
+                        }
+                liste.append(info)
+        return liste
