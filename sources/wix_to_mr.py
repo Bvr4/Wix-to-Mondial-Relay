@@ -3,6 +3,8 @@ import json
 import os
 from mondialrelay_pyt import MRWebService
 import logging
+import csv
+import datetime
 
 class WixToMR():
     def __init__(self):
@@ -10,6 +12,9 @@ class WixToMR():
         dir = os.path.dirname(path) 
         dir_config = dir.replace('sources', 'config')
         dir_tokens = dir.replace('sources', 'tokens')
+
+        now = datetime.datetime.now()
+        self.csv_file = f"export_csv_pour_mondial_relay_{str(now.year)}-{str(now.month)}-{str(now.day)}_{str(now.hour)}-{str(now.minute)}.csv"
 
         # Lecture des informations sur l'expéditeur, stockées dans un json
         with open(dir_config + '/informations_expediteur.json') as f:
@@ -85,24 +90,35 @@ class WixToMR():
         items_to_fulfill = self.creer_items_fuflfillment(order)
         logging.debug("items to fulfill : " + str(items_to_fulfill))
 
-        # Création étiquette Mondial Relay
-        connexion_mr = MRWebService(self.mr_private_key)
-        req_mr = connexion_mr.make_shipping_label(dico)
-        logging.debug(req_mr)
+        # Pour l'instant l'api MR bug, du coup on crée un fichier CSV :
+        dico_csv = self.creer_dictionnaire_MR_csv(dico)
 
-        # # Téléchargement du pdf contenant l'étiquette
-        url_etiquette_10x15 = req_mr['URL_Etiquette'].replace('format=A4', 'format=10x15')
-        etiquette = requests.get(url_etiquette_10x15)
-        open(f"etiquette_{req_mr['ExpeditionNum']}.pdf", "wb").write(etiquette.content)
+        with open(self.csv_file, 'a', newline='') as fichier_csv:
+            # Création de l'objet writer
+            writer = csv.writer(fichier_csv, delimiter = ";")
+
+            # Écriture des valeurs dans le fichier
+            writer.writerow(list(dico_csv.values()))
+
+
+        # Création étiquette Mondial Relay
+        # connexion_mr = MRWebService(self.mr_private_key)
+        # req_mr = connexion_mr.make_shipping_label(dico)
+        # logging.debug(req_mr)
+
+        # Téléchargement du pdf contenant l'étiquette
+        # url_etiquette_10x15 = req_mr['URL_Etiquette'].replace('format=A4', 'format=10x15')
+        # etiquette = requests.get(url_etiquette_10x15)
+        # open(f"etiquette_{req_mr['ExpeditionNum']}.pdf", "wb").write(etiquette.content)
 
         # Mise à jour des informations Wix sur la livraison
-        url = 'https://www.wixapis.com/stores/v2/orders/' + order['id'] + '/fulfillments'
-        query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}' # à vérifier !!
-        print(query)
-        response = requests.post(url, headers=self.headers, data=query) 
-        if response.status_code != 200:
-            raise Exception(f"Impossible de mettre à jour le status de la commande {order['number']}")
-        print(response)
+        # url = 'https://www.wixapis.com/stores/v2/orders/' + order['id'] + '/fulfillments'
+        # query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}'
+        # print(query)
+        # response = requests.post(url, headers=self.headers, data=query) 
+        # if response.status_code != 200:
+        #     raise Exception(f"Impossible de mettre à jour le status de la commande {order['number']}")
+        # print(response)
 
         order['traitementOK'] = True
 
@@ -151,9 +167,9 @@ class WixToMR():
 
         if 'phone' in order['buyerInfo']:
             if order['buyerInfo']['phone'].startswith('06'):
-                dico['Dest_Tel1'] = '0033' + order['buyerInfo']['phone'][1:]
+                dico['Dest_Tel1'] = '+33' + order['buyerInfo']['phone'][1:]
             elif order['buyerInfo']['phone'].startswith('33') and len(order['buyerInfo']['phone']) == 11:
-                dico['Dest_Tel1'] = '00' + order['buyerInfo']['phone']
+                dico['Dest_Tel1'] = '+' + order['buyerInfo']['phone']
             elif order['buyerInfo']['phone'].startswith('320032'):
                 dico['Dest_Tel1'] = order['buyerInfo']['phone'][3:]
             else:
@@ -180,3 +196,59 @@ class WixToMR():
                         }
                 liste.append(info)
         return liste
+    
+    def creer_dictionnaire_MR_csv(self, dico):
+        csv_dict = {
+            'A': '',
+            'B': dico['NDossier'],
+            'C': dico['Dest_Ad1'],
+            'D': '',
+            'E': dico['Dest_Ad3'],
+            'F': '',
+            'G': dico['Dest_Ville'],
+            'H': dico['Dest_CP'],
+            'I': dico['Dest_Pays'],
+            'J': '',
+            'K': '',
+            'L': dico['Dest_Mail'],
+            'M': 'A', # à vérifier
+            'N': '',
+            'O': '',
+            'P': 'R',
+            'Q': dico['LIV_Rel'],
+            'R': dico['LIV_Rel_Pays'],
+            'S': dico['ModeLiv'],
+            'T': '',
+            'U': 1,
+            'V': dico['Poids'],
+            'W': '',
+            'X': '',
+            'Y': '',
+            'Z': '',
+            'AA': '',
+            'AB': '',
+            'AC': '',
+            'AD': '',
+            'AE': '',
+            'AF': '',
+            'AG': '',
+            'AH': '',
+            'AI': '',
+            'AJ': '',
+            'AK': '',
+            'AL': '',
+            'AM': '',
+            'AN': '',
+            'AO': '',
+            'AP': '',
+            'AQ': '',
+            'AR': ''
+        }
+
+        if 'Dest_Ad4' in dico:
+            csv_dict['F'] = dico['Dest_Ad4']
+
+        if 'Dest_Tel1' in dico:
+            csv_dict['J'] = dico['Dest_Tel1']
+
+        return csv_dict
