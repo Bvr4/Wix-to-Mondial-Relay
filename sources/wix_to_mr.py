@@ -26,9 +26,9 @@ class WixToMR():
             wix_api_key=f.read().strip('\n')
 
         # Lecture des tokens pour l'API Mondial Relay
-        with open(dir_tokens + '/mr_enseigne_test.token') as f:     # (test !!!)
+        with open(dir_tokens + '/mr_enseigne.token') as f: 
             self.mr_enseigne=f.read().strip('\n')
-        with open(dir_tokens + '/mr_private_key_test.token') as f:  # (test !!!)
+        with open(dir_tokens + '/mr_private_key.token') as f:
             self.mr_private_key=f.read().strip('\n')
 
         # Récupération des site_id 
@@ -88,30 +88,25 @@ class WixToMR():
         logging.debug("items to fulfill : " + str(items_to_fulfill))
 
         # Création étiquette Mondial Relay
-        connexion_mr = MRWebService(self.mr_private_key)
-        req_mr = connexion_mr.make_shipping_label(dico)
+        req_mr = make_shipping_label(dico)
         logging.debug(req_mr)
 
         # # Téléchargement du pdf contenant l'étiquette
-        url_etiquette_10x15 = req_mr['URL_Etiquette'].replace('format=A4', 'format=10x15').replace('http://api', 'https://www')
-        etiquette = requests.get(url_etiquette_10x15)
-        open(f"etiquette_{req_mr['ExpeditionNum']}.pdf", "wb").write(etiquette.content)
+        etiquette = requests.get(req_mr['Url'])
+        open(f"etiquette_{req_mr['ShipmentNumber']}.pdf", "wb").write(etiquette.content)
 
         # Mise à jour des informations Wix sur la livraison
-        # url = 'https://www.wixapis.com/stores/v2/orders/' + order['id'] + '/fulfillments'     # ancien
-        # url = 'https://www.wixapis.com/ecom/v1/fulfillments/orders/' + order['id'] + '/create-fulfillment'    # nouveau, à tester !
-        # query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}' # à vérifier !!
+        url = 'https://www.wixapis.com/ecom/v1/fulfillments/orders/' + order['id'] + '/create-fulfillment' 
+        query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ShipmentNumber']) + '"}}}' # à vérifier !!
         
-        # response = requests.post(url, headers=self.headers, data=query) 
-        # if response.status_code != 200:
-        #     raise Exception(f"Impossible de mettre à jour le status de la commande {order['number']}")
+        response = requests.post(url, headers=self.headers, data=query) 
+        if response.status_code != 200:
+            raise Exception(f"Impossible de mettre à jour le status de la commande {order['number']}")
         
         order['traitementOK'] = True
 
     # Création du dictionnaire à destination de MRWebService
     def creer_dictionnaire_MR(self, order):
-        pays = order['shippingInfo']['code'][5:7]
-
         dico = {}        
 
         dico['Login'] = self.mr_enseigne + 'BDTEST@business-api.mondialrelay.com'   # à vérifier !
@@ -120,67 +115,51 @@ class WixToMR():
         dico['Culture'] = 'fr-FR'
         dico['OutputFormat'] = '10x15'
 
-        dico['OutputFormat'] = '10x15'
+        dico['OrderNo'] = str(order['number'])
+        dico['DeliveryMode'] = self.infos_collecte_mode_livraison['ModeLiv']
+        dico['DeliveryLocation'] = order['shippingInfo']['code'][5:]
+        dico['CollectionMode'] = self.infos_collecte_mode_livraison['ModeCol']
+        dico['ParcelWeight'] = str(int(float(order['totals']['weight']) * 1000))
 
-
-
-
-        dico['Enseigne'] = self.mr_enseigne  
-        dico['ModeCol'] = self.infos_collecte_mode_livraison['ModeCol']        # valeur à vérifier
-        dico['ModeLiv'] = self.infos_collecte_mode_livraison['ModeLiv']        # valeur à vérifier
-        dico['NDossier'] = str(order['number'])
-        dico['Expe_Langage'] = 'FR'
-        dico['Expe_Ad1'] = self.infos_expe['Expe_Ad1'] 
-        dico['Expe_Ad3'] = self.infos_expe['Expe_Ad3']
-        dico['Expe_Ad4'] = self.infos_expe['Expe_Ad4']
-        dico['Expe_Ville'] = self.infos_expe['Expe_Ville']
-        dico['Expe_CP'] = self.infos_expe['Expe_CP']
-        dico['Expe_Pays'] = self.infos_expe['Expe_Pays']
-        dico['Expe_Tel1'] = self.infos_expe['Expe_Tel1']
-        dico['Dest_Langage'] = order['buyerLanguage'].upper()
-        dico['Dest_Ad1'] = order['buyerInfo']['firstName'] + " " + order['buyerInfo']['lastName']
+        dico['SenderStreetname'] = self.infos_expe['ExpeNomRue']
+        dico['SenderHouseNo'] = self.infos_expe['ExpeNoRue']
+        dico['SenderCountryCode'] = self.infos_expe['ExpePays']
+        dico['SenderPostCode'] = self.infos_expe['ExpeCP']
+        dico['SenderCity'] = self.infos_expe['ExpeVille']
+        dico['SenderAddressAdd1'] = self.infos_expe['ExpeAd1']
+        dico['SenderAddressAdd2'] = self.infos_expe['ExpeAd2']
+        dico['SenderAddressAdd3'] = self.infos_expe['ExpeAd3']
+        dico['SenderPhoneNo'] = self.infos_expe['ExpeTel1']
+        
+        dico['RecipientCountryCode'] = order['recipientInfo']['address']['country']
+        dico['RecipientAddressAdd1'] = order['recipientInfo']['contactDetails']['lastName'] + order['recipientInfo']['contactDetails']['firstName']
+        dico['RecipientEmail'] = order['buyerInfo']['email']
 
         # Si l'adresse de l'acheteur est indiquée on la donne à MR, sinon on donne l'adresse du point relay
-        if 'addressLine1' in order['billingInfo']['address']:
-            dico['Dest_Ad3'] = order['billingInfo']['address']['addressLine1']
+        if 'addressLine' in order['recipientInfo']['address']:
+            dico['RecipientStreetname'] = order['recipientInfo']['address']['addressLine']
         else:
-            dico['Dest_Ad3'] = order['shippingInfo']['pickupDetails']['pickupAddress']['addressLine1']
-        if 'addressLine2' in order['billingInfo']['address']:
-            dico['Dest_Ad4'] = order['billingInfo']['address']['addressLine2']
-        if 'city' in order['billingInfo']['address']:
-            dico['Dest_Ville'] = order['billingInfo']['address']['city']
+            dico['RecipientStreetname'] = order['shippingInfo']['logistics']['pickupDetails']['address']['addressLine']            
+        if 'city' in order['recipientInfo']['address']:
+            dico['RecipientCity'] = order['recipientInfo']['address']['city']
         else:
-            dico['Dest_Ville'] = order['shippingInfo']['pickupDetails']['pickupAddress']['city']
-        if 'zipCode' in order['billingInfo']['address']:
-            dico['Dest_CP'] = order['billingInfo']['address']['zipCode']
+            dico['RecipientCity'] = order['shippingInfo']['logistics']['pickupDetails']['address']['city']
+        if 'postalCode' in order['recipientInfo']['address']:
+            dico['RecipientPostCode'] = order['recipientInfo']['address']['postalCode']
         else:
-            dico['Dest_CP'] = order['shippingInfo']['pickupDetails']['pickupAddress']['zipCode']
-        
-        if len(dico['Dest_Ad3']) > 32:
-            if not 'Dest_Ad4' in dico:
-                dico['Dest_Ad4'] = dico['Dest_Ad3'][32:63]
-            dico['Dest_Ad3'] = dico['Dest_Ad3'][:31]
+            dico['RecipientPostCode'] = order['shippingInfo']['logistics']['pickupDetails']['address']['postalCode']
 
-        dico['Dest_Pays'] = pays
-
-        if 'phone' in order['buyerInfo']:
-            if order['buyerInfo']['phone'].startswith('06'):
-                dico['Dest_Tel1'] = '0033' + order['buyerInfo']['phone'][1:]
-            elif order['buyerInfo']['phone'].startswith('33') and len(order['buyerInfo']['phone']) == 11:
-                dico['Dest_Tel1'] = '00' + order['buyerInfo']['phone']
-            elif order['buyerInfo']['phone'].startswith('320032'):
-                dico['Dest_Tel1'] = order['buyerInfo']['phone'][3:]
+        # On traite les cas particuliers des numéros de téléphones
+        if 'phone' in order['recipientInfo']['contactDetails']:
+            phone = order['recipientInfo']['contactDetails']['phone'].replace(" ", "")
+            if phone.startswith('06') or phone.startswith('07'):
+                dico['RecipientPhoneNo'] = '0033' + phone[1:]
+            elif phone.startswith('33') and len(phone) == 11:
+                dico['RecipientPhoneNo'] = '00' + phone
+            elif phone.startswith('320032'):
+                dico['RecipientPhoneNo'] = phone[3:]
             else:
-                dico['Dest_Tel1'] = order['buyerInfo']['phone']
-
-        dico['Dest_Mail'] = order['buyerInfo']['email']
-        dico['Poids'] = str(int(float(order['totals']['weight']) * 1000))
-        dico['NbColis'] = '1'
-        dico['CRT_Valeur'] = '0'
-        dico['COL_Rel_Pays'] = 'FR'
-        dico['COL_Rel'] = self.infos_collecte_mode_livraison['COL_Rel'] 
-        dico['LIV_Rel_Pays'] = pays
-        dico['LIV_Rel'] = order['shippingInfo']['code'][8:]
+                dico['RecipientPhoneNo'] = phone
 
         return dico
     
@@ -188,8 +167,8 @@ class WixToMR():
     def creer_items_fuflfillment(self, order):
         liste = []
         for item in order['lineItems']:
-            if item['lineItemType'] == 'PHYSICAL':
-                info = {'index':  item['index'],
+            if item['itemType']['preset'] == 'PHYSICAL':
+                info = {'index':  item['id'],
                         'quantity': item['quantity']
                         }
                 liste.append(info)
