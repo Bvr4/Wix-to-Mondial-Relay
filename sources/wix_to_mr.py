@@ -1,7 +1,7 @@
 import requests
 import json
 import os
-from mondialrelay_pyt import MRWebService
+from mondialrelay_pyt import make_shipping_label
 import logging
 
 class WixToMR():
@@ -26,9 +26,9 @@ class WixToMR():
             wix_api_key=f.read().strip('\n')
 
         # Lecture des tokens pour l'API Mondial Relay
-        with open(dir_tokens + '/mr_enseigne.token') as f:
+        with open(dir_tokens + '/mr_enseigne_test.token') as f:     # (test !!!)
             self.mr_enseigne=f.read().strip('\n')
-        with open(dir_tokens + '/mr_private_key.token') as f:
+        with open(dir_tokens + '/mr_private_key_test.token') as f:  # (test !!!)
             self.mr_private_key=f.read().strip('\n')
 
         # Récupération des site_id 
@@ -55,10 +55,10 @@ class WixToMR():
 
     # Récupération de la liste des commandes à envoyer
     def recuperer_commandes_wix(self):
-        url = 'https://www.wixapis.com/stores/v2/orders/query'
+        url = 'https://www.wixapis.com/ecom/v1/orders/search'
 
         # Requète permettant de récupérer les commande non envoyées
-        query = '{"query":{"filter": "{\\"$or\\": [{\\"fulfillmentStatus\\": \\"NOT_FULFILLED\\"}, {\\"fulfillmentStatus\\": \\"PARTIALLY_FULFILLED\\"}]}","paging": {"limit": 100}, "sort":"[{\\"dateCreated\\": \\"desc\\"}]"}}'
+        query = '{"search":{"filter": {"$or": [{"fulfillmentStatus": "NOT_FULFILLED"}, {"fulfillmentStatus": "PARTIALLY_FULFILLED"}]}, "sort":[{"fieldName": "dateCreated"}, {"order": "DESC"}]}}'
 
         response = requests.post(url, headers=self.headers, data=query)
         if response.status_code != 200:
@@ -66,8 +66,10 @@ class WixToMR():
         
         json_response = response.json()
 
+        print(json_response['orders'][0])
+
         # On filtre les commandes pour ne garder que celles avec Mondial Relay comme mode de livraison
-        self.mr_orders = [order for order in json_response['orders'] if order['shippingInfo']['deliveryOption'].startswith("MONDIAL RELAY")]
+        self.mr_orders = [order for order in json_response['orders'] if ('shippingInfo' in order and order['shippingInfo']['title'].startswith("MONDIAL RELAY"))]
 
     # Traitement d'une commande : téléchargement du bon Mondial Relay + MAJ infos livraisons chez Wix
     def traiter_commande(self, order_number):
@@ -77,7 +79,7 @@ class WixToMR():
         except:
             raise IndexError("Ce numéro de commande n'existe pas dans la liste des commandes en attente : " + str(order_number))
         
-        logging.info(f"Traitement commande N°{order['number']} - {order['buyerInfo']['firstName']} {order['buyerInfo']['lastName']}")
+        logging.info(f"Traitement commande N°{order['number']} - {order['billingInfo']['contactDetails']['firstName']} {order['billingInfo']['contactDetails']['lastName']}")
 
         dico = self.creer_dictionnaire_MR(order)
         logging.debug(dico)
@@ -91,19 +93,19 @@ class WixToMR():
         logging.debug(req_mr)
 
         # # Téléchargement du pdf contenant l'étiquette
-        url_etiquette_10x15 = req_mr['URL_Etiquette'].replace('format=A4', 'format=10x15')
+        url_etiquette_10x15 = req_mr['URL_Etiquette'].replace('format=A4', 'format=10x15').replace('http://api', 'https://www')
         etiquette = requests.get(url_etiquette_10x15)
         open(f"etiquette_{req_mr['ExpeditionNum']}.pdf", "wb").write(etiquette.content)
 
         # Mise à jour des informations Wix sur la livraison
-        url = 'https://www.wixapis.com/stores/v2/orders/' + order['id'] + '/fulfillments'
-        query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}' # à vérifier !!
-        print(query)
-        response = requests.post(url, headers=self.headers, data=query) 
-        if response.status_code != 200:
-            raise Exception(f"Impossible de mettre à jour le status de la commande {order['number']}")
-        print(response)
-
+        # url = 'https://www.wixapis.com/stores/v2/orders/' + order['id'] + '/fulfillments'     # ancien
+        # url = 'https://www.wixapis.com/ecom/v1/fulfillments/orders/' + order['id'] + '/create-fulfillment'    # nouveau, à tester !
+        # query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ExpeditionNum']) + '"}}}' # à vérifier !!
+        
+        # response = requests.post(url, headers=self.headers, data=query) 
+        # if response.status_code != 200:
+        #     raise Exception(f"Impossible de mettre à jour le status de la commande {order['number']}")
+        
         order['traitementOK'] = True
 
     # Création du dictionnaire à destination de MRWebService
@@ -111,6 +113,18 @@ class WixToMR():
         pays = order['shippingInfo']['code'][5:7]
 
         dico = {}        
+
+        dico['Login'] = self.mr_enseigne + 'BDTEST@business-api.mondialrelay.com'   # à vérifier !
+        dico['Password'] = self.mr_private_key
+        dico['CustomerId'] = self.mr_enseigne
+        dico['Culture'] = 'fr-FR'
+        dico['OutputFormat'] = '10x15'
+
+        dico['OutputFormat'] = '10x15'
+
+
+
+
         dico['Enseigne'] = self.mr_enseigne  
         dico['ModeCol'] = self.infos_collecte_mode_livraison['ModeCol']        # valeur à vérifier
         dico['ModeLiv'] = self.infos_collecte_mode_livraison['ModeLiv']        # valeur à vérifier

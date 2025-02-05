@@ -135,7 +135,7 @@ class App(ctk.CTk):
             logging.exception(e)
             raise e
             
-        liste = [f"{order['number']} - {order['buyerInfo']['firstName']} {order['buyerInfo']['lastName']}" for order in self.commandes_wix_mr.mr_orders]
+        liste = [f"{order['number']} - {order['billingInfo']['contactDetails']['firstName']} {order['billingInfo']['contactDetails']['lastName']}" for order in self.commandes_wix_mr.mr_orders]
         for item in liste:
             self.check_box_frame.add_item(item)
 
