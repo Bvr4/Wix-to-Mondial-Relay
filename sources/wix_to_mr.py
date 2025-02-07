@@ -66,8 +66,6 @@ class WixToMR():
         
         json_response = response.json()
 
-        print(json_response['orders'][0])
-
         # On filtre les commandes pour ne garder que celles avec Mondial Relay comme mode de livraison
         self.mr_orders = [order for order in json_response['orders'] if ('shippingInfo' in order and order['shippingInfo']['title'].startswith("MONDIAL RELAY"))]
 
@@ -75,7 +73,7 @@ class WixToMR():
     def traiter_commande(self, order_number):
         # On récupère la commande demandée
         try:
-            order = [order for order in self.mr_orders if order['number']==order_number][0]
+            order = [order for order in self.mr_orders if str(order['number'])==str(order_number)][0]
         except:
             raise IndexError("Ce numéro de commande n'existe pas dans la liste des commandes en attente : " + str(order_number))
         
@@ -91,7 +89,7 @@ class WixToMR():
         req_mr = make_shipping_label(dico)
         logging.debug(req_mr)
 
-        # # Téléchargement du pdf contenant l'étiquette
+        # Téléchargement du pdf contenant l'étiquette
         etiquette = requests.get(req_mr['Url'])
         open(f"etiquette_{req_mr['ShipmentNumber']}.pdf", "wb").write(etiquette.content)
 
@@ -109,7 +107,18 @@ class WixToMR():
     def creer_dictionnaire_MR(self, order):
         dico = {}        
 
-        dico['Login'] = self.mr_enseigne + 'BDTEST@business-api.mondialrelay.com'   # à vérifier !
+        # Calcul du poids total et prix total
+        order['totalWeight'] = 0
+        order['totalPrice'] = 0
+        for item in order['lineItems']:
+            if item['itemType']['preset'] == 'PHYSICAL':
+                q = int(item['quantity'])
+                w = float(item['physicalProperties']['weight'])
+
+                order['totalWeight'] += q * w
+                order['totalPrice'] += float(item['totalPriceAfterTax']['amount'])
+
+        dico['Login'] = self.mr_enseigne + '@business-api.mondialrelay.com' 
         dico['Password'] = self.mr_private_key
         dico['CustomerId'] = self.mr_enseigne
         dico['Culture'] = 'fr-FR'
@@ -119,7 +128,7 @@ class WixToMR():
         dico['DeliveryMode'] = self.infos_collecte_mode_livraison['ModeLiv']
         dico['DeliveryLocation'] = order['shippingInfo']['code'][5:]
         dico['CollectionMode'] = self.infos_collecte_mode_livraison['ModeCol']
-        dico['ParcelWeight'] = str(int(float(order['totals']['weight']) * 1000))
+        dico['ParcelWeight'] = str(int(float(order['totalWeight']) * 1000))
 
         dico['SenderStreetname'] = self.infos_expe['ExpeNomRue']
         dico['SenderHouseNo'] = self.infos_expe['ExpeNoRue']
@@ -131,9 +140,14 @@ class WixToMR():
         dico['SenderAddressAdd3'] = self.infos_expe['ExpeAd3']
         dico['SenderPhoneNo'] = self.infos_expe['ExpeTel1']
         
-        dico['RecipientCountryCode'] = order['recipientInfo']['address']['country']
-        dico['RecipientAddressAdd1'] = order['recipientInfo']['contactDetails']['lastName'] + order['recipientInfo']['contactDetails']['firstName']
         dico['RecipientEmail'] = order['buyerInfo']['email']
+        dico['RecipientCountryCode'] = order['recipientInfo']['address']['country']
+        dico['RecipientAddressAdd1'] = order['recipientInfo']['contactDetails']['lastName'] + " " + order['recipientInfo']['contactDetails']['firstName']
+        
+        if len(dico['RecipientAddressAdd1']) > 30 :
+            dico['RecipientAddressAdd2'] = dico['RecipientAddressAdd1'][30:]
+            dico['RecipientAddressAdd1'] = dico['RecipientAddressAdd1'][:30]
+
 
         # Si l'adresse de l'acheteur est indiquée on la donne à MR, sinon on donne l'adresse du point relay
         if 'addressLine' in order['recipientInfo']['address']:

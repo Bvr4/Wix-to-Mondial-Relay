@@ -34,18 +34,22 @@ def creer_listing_commandes(commandes):
             y = h - margin
 
         c.setFont("Helvetica-Bold", font_size)
-        texte= f"Commande N°{commande['number']} - {commande['buyerInfo']['firstName']} {commande['buyerInfo']['lastName']}    ({commande['totals']['subtotal']}€ de marchandise)"
+        texte= f"Commande N°{commande['number']} - {commande['billingInfo']['contactDetails']['firstName']} {commande['billingInfo']['contactDetails']['lastName']}    ({commande['totalPrice']}€ de marchandise)"
         c.drawString(x, y, texte)
         y -= font_size
 
         c.setFont("Helvetica", font_size)
 
         for item in commande['lineItems']:
-            texte1 = f"{item['quantity']} * {item['price']}  -  {item['totalPrice']}€"
-            if len(item['options']) > 0:
-                texte2 = f"   ---   {item['name']}  ({item['options'][0]['selection']})"
+            texte1 = f"{item['quantity']} * {item['price']['formattedAmount']}  -  {item['totalPriceAfterTax']['formattedAmount']}"
+            if len(item['catalogReference']['options']['options']) > 0:
+                options = ""
+                for option_type, option_value in item['catalogReference']['options']['options'].items():
+                    options += f"{option_type} : {option_value} "
+
+                texte2 = f"   ---   {item['productName']['original']}  ({options})"
             else:
-                texte2 = f"   ---   {item['name']}"
+                texte2 = f"   ---   {item['productName']['original']}"
             c.drawString(x, y, texte1)
             c.drawString(x+120, y, texte2)
             y -= font_size + 2
