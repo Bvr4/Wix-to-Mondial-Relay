@@ -95,7 +95,7 @@ class WixToMR():
 
         # Mise à jour des informations Wix sur la livraison
         url = 'https://www.wixapis.com/ecom/v1/fulfillments/orders/' + order['id'] + '/create-fulfillment' 
-        query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ShipmentNumber']) + '"}}}' # à vérifier !!
+        query =  '{"fulfillment": {"lineItems": ' + json.dumps(items_to_fulfill) + ',"trackingInfo": {"shippingProvider": "Mondial Relay", "trackingNumber": "' + str(req_mr['ShipmentNumber']) + '"}}}' 
         
         response = requests.post(url, headers=self.headers, data=query) 
         if response.status_code != 200:
@@ -182,8 +182,9 @@ class WixToMR():
         liste = []
         for item in order['lineItems']:
             if item['itemType']['preset'] == 'PHYSICAL':
-                info = {'index':  item['id'],
+                info = {'id':  item['id'],
                         'quantity': item['quantity']
                         }
                 liste.append(info)
+
         return liste
